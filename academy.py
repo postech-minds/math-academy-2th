@@ -1,6 +1,9 @@
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from tqdm.notebook import trange
 
 
@@ -133,6 +136,55 @@ class Music:
         self.nodelist = np.loadtxt(fpath)
 
 
+class LSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, num_layers, bidirectional=False):
+        super(LSTM, self).__init__()
+        self.rnn = nn.LSTM(input_size=input_size, hidden_size=hidden_size,
+                           num_layers=num_layers, bidirectional=bidirectional)
+        if bidirectional:
+            hidden_size *= 2
+        self.head = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        x, _ = self.rnn(x)
+        x = x.squeeze(1)
+        x = self.head(x)
+
+        return x
+
+
+class OverlapMatrixModel(nn.Module):
+    def __init__(self, dim_input, dim_hidden, dim_output, num_nodes, dropout=0.3):
+        def fanin_(size):
+            """
+            Take a look "Experiment Details" in the DDPG paper
+            code from: https://blog.paperspace.com/physics-control-tasks-with-deep-reinforcement-learning/
+            """
+            fan_in = size[0]
+            weight = 2. / math.sqrt(fan_in)
+            return torch.Tensor(size).uniform_(-weight, weight)
+        super(OverlapMatrixModel, self).__init__()
+        self.fc1 = nn.Linear(dim_input, dim_hidden)
+        self.fc1.weight.data = fanin_(self.fc1.weight.data.size())
+
+        self.fc2 = nn.Linear(dim_hidden, 2 * dim_hidden)
+        self.fc2.weight.data = fanin_(self.fc2.weight.data.size())
+
+        self.fc3 = nn.Linear(2 * dim_hidden, dim_output)
+        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
+
+        self.num_nodes = num_nodes
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        x = x.view((-1, self.num_nodes))
+
+        return x
+
+
 def train(model, X, y, task='regression', epochs=100, lr=0.001):
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -147,7 +199,7 @@ def train(model, X, y, task='regression', epochs=100, lr=0.001):
     if isinstance(y, np.ndarray):
         y = torch.from_numpy(y).float()
 
-    if y.ndim == 1:
+    if y.ndim == 1 and task == 'regression':
         y = y.unsqueeze(1)
 
     t = trange(epochs, desc="Log")
@@ -162,15 +214,32 @@ def train(model, X, y, task='regression', epochs=100, lr=0.001):
 
 
 @torch.no_grad()
-def forecast(model, x, n):
+def forecast(model, x, n, recurrent=False):
     model.eval()
     if isinstance(x, np.ndarray):
         x = torch.from_numpy(x).float()
 
-    pred = []
-    for i in range(n):
-        out = model(x).detach()
-        pred.append(out.numpy())
-        x = torch.cat((x[1:], out))
+    if not recurrent:
+        pred = []
+        for i in range(n):
+            out = model(x).detach()
+            pred.append(out.numpy())
+            x = torch.cat((x[1:], out))
 
-    return np.array(pred)
+        return np.array(pred)
+
+    else:
+        if not isinstance(x, torch.Tensor):
+            x = torch.tensor(x, dtype=torch.float32)
+
+        if x.ndim == 0:
+            x = x.unsqueeze(0)
+        if x.ndim == 1:
+            x = x.unsqueeze(0)
+            x = x.unsqueeze(0)
+
+        for i in range(n):
+            x_next = model(x)
+            x = torch.cat((x, x_next[-1].unsqueeze(0).unsqueeze(0)))
+
+        return x.numpy()[:, 0, :]

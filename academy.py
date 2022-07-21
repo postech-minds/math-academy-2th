@@ -135,6 +135,63 @@ class Music:
         # self.nodelist = sorted(np.loadtxt(fpath))
         self.nodelist = np.loadtxt(fpath)
 
+    def load_cycles(self, fpath):
+        """
+        Args:
+            fpath (_type_): input_matlabinfo
+
+        Returns:
+            _type_: _description_
+        """
+        import json
+        f = open(fpath, 'r')
+        l = len(f.readlines())
+        f = open(fpath, 'r')
+
+        # s = f.readlines()
+        s = []
+        for i in range(l):
+            s.append(f.readline())
+
+        # dim1 info
+        d1s = []
+        for i in range(l):
+            if s[i] == 'Dimension: 1\n':
+                start_inx = i+1
+        for j in range(start_inx, l):
+            if s[j] == 'Dimension: 2\n' or s[j] == '\n':
+                end_inx = j
+                break
+        for k in range(start_inx, end_inx):
+            d1s.append(s[k])
+
+        # get cycle info
+        c_info = []
+        for i in range(len(d1s)):
+            ci_int, ci = d1s[i].split(': ')
+            ci = ci.split('\n')[0]
+            ci_edge = ci.split(' + ')
+            for j in range(len(ci_edge)):
+                if ci_edge[j][0] == '-':
+                    ci_edge[j] = json.loads(ci_edge[j][1:])
+                    ci_edge[j] = ci_edge[j][::-1]
+                else:
+                    ci_edge[j] = json.loads(ci_edge[j])
+            ci_node = []
+            for k in range(len(ci_edge)):
+                for node in ci_edge[k]:
+                    if not(node in ci_node):
+                        ci_node.append(node)
+            ci_node.sort()
+            c_info.append([ci_node, ci_int, ci_edge])
+        c = []
+        e = []
+        for i in range(len(c_info)):
+            c.append(c_info[i][0])
+            e.append(c_info[i][2])
+
+        self.cycles = c
+
 
 class LSTM(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, num_layers, bidirectional=False):

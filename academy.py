@@ -242,10 +242,10 @@ class OverlapMatrixModel(nn.Module):
         return x
 
 
-def train(model, X, y, task='regression', epochs=100, lr=0.001):
+def train(model, X, y, task='regression', epochs=100, lr=0.001, weight=None):
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss() if task == 'regression' else nn.CrossEntropyLoss()
+    criterion = nn.MSELoss() if task == 'regression' else nn.CrossEntropyLoss(weight=weight)
 
     if isinstance(X, np.ndarray):
         X = torch.from_numpy(X).float()
